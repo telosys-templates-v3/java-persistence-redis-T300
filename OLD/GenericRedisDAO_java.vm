@@ -1,12 +1,12 @@
 #parse("include/java_header.vm")
+
 package ${target.javaPackageFromFolder($SRC)};
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.demo.persistence.impl.redis.commons.json.JsonMapper;
-import org.demo.persistence.impl.redis.commons.json.impl.gson.GsonMapper;
+import org.codehaus.jackson.map.ObjectMapper;
 
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.ScanParams;
@@ -26,9 +26,10 @@ public abstract class GenericRedisDAO<T> {
 	private final static String SEPARATOR= ":";
 	//private final static String NX= "nx"; // SET OPTION : Only set the key if it does not already exist
 	private final static String XX= "xx"; // SET OPTION : Only set the key if it already exist
+	//private final static String INCR= "incr.";
 	private final static String INITIAL_CURSOR= "0";
 	
-	private final static JsonMapper mapper = new GsonMapper();
+	private final static ObjectMapper mapper = new ObjectMapper();
 	
 	private final Class<T> entityClass;
 	private final String   entityName;
@@ -66,7 +67,7 @@ public abstract class GenericRedisDAO<T> {
 	// UTILITY METHODS
 	//-----------------------------------------------------------------------------------------
 	/**
-	 * Builds a Redis key composed of the entity name + ":" + the bean key 
+	 * Builds a Redis key composed of the entity class name + ":" + the bean key 
 	 * @param bean
 	 * @return
 	 */
@@ -74,13 +75,21 @@ public abstract class GenericRedisDAO<T> {
 		return entityName + SEPARATOR + getKey(bean);
 	}
 	
+//	private String buildRedisKey(long id) {
+//		return entity + SEPARATOR + id ;
+//	}
+	
 	/**
 	 * Converts the given bean to a JSON string
 	 * @param bean
 	 * @return
 	 */
 	private String beanToJson(T bean) {
-		return mapper.beanToJson(bean);
+		try {
+			return mapper.writeValueAsString(bean);
+		} catch (Exception e) {
+			throw new RuntimeException("Cannot convert BEAN to JSON", e);
+		}
 	}
 	
 	/**
@@ -89,7 +98,16 @@ public abstract class GenericRedisDAO<T> {
 	 * @return
 	 */
 	private T jsonToBean(String json) {
-		return mapper.jsonToBean(json, entityClass);
+		if ( json != null ) {
+			try {
+				return mapper.readValue(json, entityClass);
+			} catch (Exception e) {
+				throw new RuntimeException("Cannot convert JSON to BEAN", e);
+			}
+		}
+		else {
+			return null ;
+		}
 	}
 	
 	/**
@@ -164,9 +182,44 @@ public abstract class GenericRedisDAO<T> {
 		}
 	}
 
+//	/**
+//	 * Inserts the given bean in the database (Redis)
+//	 * 
+//	 * @param bean
+//	 */
+//	protected boolean doInsertIncr_OLD(T bean) {
+//		try (Jedis jedis = getJedisInstance()) {
+//			long nextId = autoIncr();
+//			String key = entity+SEPARATOR+String.valueOf(nextId);
+//			while (jedis.exists(key)) {
+//				nextId = autoIncr();
+//				key = entity+SEPARATOR+String.valueOf(nextId);
+//			}
+//			String result = jedis.set(key, mapper.writeValueAsString(bean), NX);
+//			
+//			
+//			String key = buildRedisAutoIncrKey( sequence.next() );
+//			String value = beanToJson(bean);
+//			while ( jedis.set(key, value, NX) != "OK" ) {
+//				key = buildRedisAutoIncrKey( sequence.next() );
+//			}
+//			return "OK".equals(result);
+//		} catch (Exception e) {
+//			throw new RuntimeException(e);
+//		}
+//	}
+	
 	protected boolean doInsertIncr(T bean) {
 		RedisSequence sequence = new RedisSequence(entityName) ;
 		try (Jedis jedis = getJedisInstance()) {
+//			setAutoIncrementedKey(bean, sequence.nextVal()) ;
+//			String key = buildRedisKey(bean);
+//			String value = beanToJson(bean);
+//			while ( insertIfInexistant(jedis, key, value) != true ) {
+//				setAutoIncrementedKey(bean, sequence.nextVal()) ;
+//				key = buildRedisKey(bean);
+//				value = beanToJson(bean);
+//			}
 			String key = "";
 			String value = "";
 			do {
@@ -195,6 +248,16 @@ public abstract class GenericRedisDAO<T> {
 		String key = buildRedisKey(bean);
 		String value = beanToJson(bean);
 		try (Jedis jedis = getJedisInstance()) {
+////			if(jedis.exists(key))
+////				throw new RuntimeException("this key already exist");
+//			String result = jedis.set(key, value, NX); // NX : Only set the key if it does not already exist
+//			// Result is 
+//			// "OK" if the key has been set 
+//			// "(nil)" if the key already exists (and then not set)
+//			//return "OK".equals(result);
+//			if ( ! "OK".equals(result) ) {
+//				throw new RuntimeException("Cannot insert, the key already exist");
+//			}
 			if ( insertIfInexistant(jedis, key, value) != true ) {
 				throw new RuntimeException("Cannot insert, the key '" + key + "' already exists");
 			}
@@ -273,6 +336,26 @@ public abstract class GenericRedisDAO<T> {
 		return getAllKeys().size();
 	}
 
+//	/**
+//	 * calcul the next value of id
+//	 * 
+//	 * @return next key available
+//	 */
+//	protected long autoIncr() { // TODO : sequence.nextVal + currval
+//		long result = 1L;
+//		String keyIncr = INCR + entity;
+//		try (Jedis jedis = getJedisInstance()) {
+////			if (jedis.get(keyIncr) != null) {
+////				result = jedis.incr(keyIncr);
+////			}else{
+////				jedis.set(keyIncr, String.valueOf(result), NX); // Inutile
+////			}
+//			result = jedis.incr(keyIncr); //  error if already set and not a number
+//			return result;
+//		} catch (JedisException e) {
+//			throw new RuntimeException(e);
+//		}
+//	}
 	/**
 	 * Returns all keys existing in the database
 	 * 
@@ -313,7 +396,14 @@ public abstract class GenericRedisDAO<T> {
 		}
 		return sb.toString();
 	}
-
+//	private final void appendArg(StringBuilder sb, Object arg ) {
+//		if ( arg != null ) {
+//			sb.append(arg.toString());
+//		}
+//		else {
+//			throw new IllegalArgumentException("Cannot build key string (null argument)");
+//		}
+//	}
 	private final void checkArguments(Object... args ) {
 		if ( args == null ) {
 			throw new IllegalArgumentException("Cannot build key string (args array is null)");
