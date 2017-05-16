@@ -58,11 +58,26 @@ public class $redisServiceClass extends GenericRedisDAO<${recordClass}> implemen
 	
 	@Override
 	protected void setAutoIncrementedKey(${recordClass} record, long value) {
+#*
 #if( $entity.hasAutoIncrementedKey() )
 		record.${entity.autoincrementedKeyAttribute.setter}((${entity.autoincrementedKeyAttribute.type})value);
 #else
 		throw new IllegalStateException("Unexpected call to method 'setAutoIncrementedKey'");
 #end
+*#
+#if( $entity.hasAutoIncrementedKey() )
+#if( $entity.autoincrementedKeyAttribute.isIntegerType() )
+		record.${entity.autoincrementedKeyAttribute.setter}(toInt(value));
+#elseif ( $entity.autoincrementedKeyAttribute.isShortType() )
+		record.${entity.autoincrementedKeyAttribute.setter}(toShort(value));
+#else
+		//record.${entity.autoincrementedKeyAttribute.setter}((${entity.autoincrementedKeyAttribute.type})value);
+		record.${entity.autoincrementedKeyAttribute.setter}(value);
+#end
+#else
+		throw new IllegalStateException("Unexpected call to method 'setAutoIncrementedKey'");
+#end
+
 	}
 
 	//-------------------------------------------------------------------------------------
